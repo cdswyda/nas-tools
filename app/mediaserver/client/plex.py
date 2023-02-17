@@ -128,7 +128,8 @@ class Plex(_IMediaClient):
                 EpisodeCount += sec.totalViewSize(libtype='episode')
             if sec.type == "artist":
                 SongCount += sec.totalSize
-        return {"MovieCount": MovieCount, "SeriesCount": SeriesCount, "SongCount": SongCount, "EpisodeCount": EpisodeCount}
+        return {"MovieCount": MovieCount, "SeriesCount": SeriesCount, "SongCount": SongCount,
+                "EpisodeCount": EpisodeCount}
 
     def get_movies(self, title, year=None):
         """
@@ -211,8 +212,9 @@ class Plex(_IMediaClient):
         """
         获取单个项目详情
         """
-
-        return None
+        item = self._plex.fetchItem(itemid)
+        ids = self.__get_ids(item.guids)
+        return {'ProviderIds': {'Tmdb': ids['tmdb_id'], 'Imdb': ids['imdb_id']}}
 
     def get_items(self, parent):
         """
@@ -228,15 +230,47 @@ class Plex(_IMediaClient):
                 for item in section.all():
                     if not item:
                         continue
+                    ids = self.__get_ids(item.guids)
+                    path = None
+                    if item.locations:
+                        path = item.locations[0]
                     yield {"id": item.key,
                            "library": item.librarySectionID,
                            "type": item.type,
                            "title": item.title,
+                           "originalTitle": item.originalTitle,
                            "year": item.year,
+                           "tmdbid": ids['tmdb_id'],
+                           "imdbid": ids['imdb_id'],
+                           "tvdbid": ids['tvdb_id'],
+                           "path": path,
                            "json": str(item.__dict__)}
         except Exception as err:
             ExceptionUtils.exception_traceback(err)
         yield {}
+
+    def __get_ids(self, guids):
+        guid_mapping = {
+            "imdb://": "imdb_id",
+            "tmdb://": "tmdb_id",
+            "tvdb://": "tvdb_id"
+        }
+        ids = {}
+        for prefix, varname in guid_mapping.items():
+            ids[varname] = None
+        for guid in guids:
+            for prefix, varname in guid_mapping.items():
+                if isinstance(guid, dict):
+                    if guid['id'].startswith(prefix):
+                        # 找到匹配的ID
+                        ids[varname] = guid['id'][len(prefix):]
+                        break
+                else:
+                    if guid.id.startswith(prefix):
+                        # 找到匹配的ID
+                        ids[varname] = guid.id[len(prefix):]
+                        break
+        return ids
 
     def get_playing_sessions(self):
         """
@@ -273,6 +307,11 @@ class Plex(_IMediaClient):
                     "S" + str(message.get('Metadata', {}).get('parentIndex')),
                     "E" + str(message.get('Metadata', {}).get('index')),
                     message.get('Metadata', {}).get('title'))
+
+                eventItem['item_id'] = message.get('Metadata', {}).get('grandparentKey')
+                eventItem['season_id'] = message.get('Metadata', {}).get('parentIndex')
+                eventItem['episode_id'] = message.get('Metadata', {}).get('index')
+
                 if message.get('Metadata', {}).get('summary') and len(message.get('Metadata', {}).get('summary')) > 100:
                     eventItem['overview'] = str(message.get('Metadata', {}).get('summary'))[:100] + "..."
                 else:
